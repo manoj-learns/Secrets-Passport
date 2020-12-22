@@ -10,6 +10,9 @@ const passport = require('passport')
 const LocalStrategy = require('passport-local').Strategy;
 const session = require('express-session');
 const passportLocalMongoose = require('passport-local-mongoose');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const findOrCreate = require('mongoose-findorcreate');
+
 //////////////////// MD5 Hashing ///////////////////////////
 const md5 = require('md5');
 
@@ -37,7 +40,8 @@ const { Schema } = mongoose;
 
 const userschema = new Schema({
   username : String,
-  password : String
+  password : String,
+  googleId : String
 });
 
 /////////////////////////////////////////// Encryption ///////////////////////////////////
@@ -46,6 +50,7 @@ const secret = process.env.SOME_LONG_UNGUESSABLE_STRING;
 //userschema.plugin(encrypt, { secret: secret , encryptedFields: ['password'] });
 
 userschema.plugin(passportLocalMongoose);
+userschema.plugin(findOrCreate);
 
 const users = mongoose.model('users',userschema);
 
@@ -53,9 +58,31 @@ const users = mongoose.model('users',userschema);
 passport.use(new LocalStrategy(users.authenticate()));
 
 // use static serialize and deserialize of model for passport session support
-passport.serializeUser(users.serializeUser());
-passport.deserializeUser(users.deserializeUser());
+//passport.serializeUser(users.serializeUser());
+//passport.deserializeUser(users.deserializeUser());
+passport.serializeUser(function(user, done) {
+  done(null, user.id);
+});
 
+passport.deserializeUser(function(id, done) {
+  users.findById(id, function(err, user) {
+    done(err, user);
+  });
+});
+passport.use(new GoogleStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets",
+    userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    console.log(profile);
+
+    users.findOrCreate({ googleId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
 /////////////////////////////////////////// Listen method /////////////////////////////////
 app.listen("3000",function(err){
   if(!err)
@@ -65,6 +92,16 @@ app.listen("3000",function(err){
 });
 
 ////////////////////////////////////////// Main Page///////////////////////////////////////////////////
+app.get("/auth/google",
+  passport.authenticate('google', { scope: ["profile"] })
+);
+
+app.get("/auth/google/secrets",
+  passport.authenticate('google', { failureRedirect: "/login" }),
+  function(req, res) {
+    // Successful authentication, redirect to secrets.
+    res.redirect("/secrets");
+  });
 
 app.route("/")
 
